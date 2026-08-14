@@ -18,5 +18,5 @@
 	url = https://github.com/B3n-17/N64ModernRuntime.git
 [submodule "Zelda64RecompSyms"]
 	path = Zelda64RecompSyms
-	url = https://github.com/Zelda64Recomp/Zelda64RecompSyms
+	url = https://github.com/B3n-17/Zelda64RecompSyms.git
 

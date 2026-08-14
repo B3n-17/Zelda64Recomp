@@ -1,0 +1,36 @@
+# Config file for Ocarina of Time NTSC 1.0 (US) Recompilation
+# Build the input ELF/ROM with `make VERSION=ntsc-1.0 REGION=US`
+[input]
+entrypoint = 0x80000400
+# Prefix every recompiled OoT function so the output can be linked alongside Majora's Mask
+func_prefix = "oot_"
+output_func_path = "RecompiledFuncsOoT"
+relocatable_sections_path = "oot_overlays.us.ntsc-1.0.txt"
+elf_path = "oot-ntsc-1.0.elf"
+rom_file_path = "oot-ntsc-1.0.z64"
+
+#   Kanji_OffsetFromShiftJIS  src/code/kanread.s        table sNonKanjiIndices
+#   LeoGetKAdr                src/libleo/api/getkadr.s  table kantbl
+#   LeoGetAAdr                src/libleo/api/getaadr.s  table asc2tbl
+function_sizes = [
+    { name = "Kanji_OffsetFromShiftJIS", size = 0x98 },
+    { name = "LeoGetKAdr", size = 0xB8 },
+    { name = "LeoGetAAdr", size = 0x70 },
+]
+
+[patches]
+stubs = [
+    # Reads boot magic values out of kseg1 via IO_READ (0x002FB1F4 / 0x002FE1C0).
+    "CIC6105_SaveBootMagicValues",
+
+    # CIC6105 anti-piracy check as an RSP task
+    "CIC6105_RunBootTask",
+
+    # Registered as a fault handler
+    "CIC6105_FaultClient",
+
+    # 64DD drive ROM init
+    "osDriveRomInit",
+]
+
+ignored = []

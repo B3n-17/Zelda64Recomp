@@ -1,0 +1,12 @@
+[input]
+elf_path = "patches_oot/patches.elf"
+output_func_path = "RecompiledPatchesOoT"
+single_file_output = true
+func_prefix = "oot_"
+use_absolute_symbols = true
+func_reference_syms_file = "Zelda64RecompSyms/oot.us.ntsc-1.0.syms.toml"
+data_reference_syms_files = [ "Zelda64RecompSyms/oot.us.ntsc-1.0.datasyms.toml", "patches_oot/static_syms.toml" ]
+output_binary_path = "patches_oot/patches.bin"
+unpaired_lo16_warnings = false
+allow_exports = true
+strict_patch_mode = true

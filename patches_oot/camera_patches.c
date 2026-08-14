@@ -131,16 +131,99 @@ static const f32 analog_camera_y_sensitivity = 500.0f;
 // and clearing it is what triggers the resync below.
 static bool analog_cam_engaged = false;
 
-// B37, third round: frames the analog camera keeps its hands off after a
-// crawlspace exit. The interpolation skip below hides the cut itself, but the
-// vanilla camera then spends its first several frames swinging from the tunnel
-// mouth back behind Link, and the analog camera latching on during that swing is
-// what still read as a lurch in play. Held at full while the scripted crawl move
-// is still playing (control is not back yet), then counted down, so the free
-// camera only takes over once the player has had control for the whole window
-// and the vanilla camera has long since settled.
-#define CRAWL_EXIT_HOLDOFF_FRAMES 40 // two seconds at the 20Hz game rate
-static s32 crawl_exit_holdoff = 0;
+// Frames the analog camera keeps its hands off after a scripted sequence - a
+// cutscene, a door, a chest, a crawlspace - hands the camera back. The vanilla
+// camera spends its first several frames flying home to where it wants to sit
+// behind the player, and the free camera stops following the moment it engages,
+// so latching on during that flight freezes the view at a half-swung angle.
+//
+// This started life as a crawlspace-specific hold-off of two seconds, which is
+// what it took to hide a lurch the gating at the time could not prevent: the
+// analog camera was still driving through most of the crawl move itself, so it
+// had to sit out the whole swing home afterwards. Now that it hands the camera
+// back for the entire sequence, there is only the tail of an ordinary swing left
+// to wait out, and the same short window serves every sequence alike.
+#define SEQUENCE_EXIT_HOLDOFF_FRAMES 8 // a little under half a second at the 20Hz game rate
+static s32 sequence_exit_holdoff = 0;
+
+/*
+ * The camera function the game is running for this camera this frame: the exact
+ * expression Camera_Update dispatches through.
+ *
+ * This is the most direct statement available of what the camera is currently
+ * doing, and it is what decides whether the free camera may drive - much more so
+ * than the setting or the mode on their own. A single setting covers up to
+ * twenty-one modes, and the cases that matter here (a cutscene camera, a door
+ * move, a fixed shot, an elevator) are exactly the ones that swap the function
+ * out from under an otherwise ordinary setting.
+ *
+ * Bounds-checked in a way Camera_Update itself does not need to be. It indexes
+ * cameraModes[mode] with no check at all, because a setting's validModes bitmask
+ * is what guarantees the mode is in range for that setting's mode array - and
+ * those arrays are often short (CAM_SET_CHU_BOWLING has one entry) and sometimes
+ * sparse. Nothing guarantees the same for a camera read from outside the update,
+ * so test the bitmask the way Camera_CheckValidMode does before indexing.
+ */
+static s32 analog_cam_active_func(Camera* cam) {
+    CameraMode* modes;
+
+    if ((cam->setting <= CAM_SET_NONE) || (cam->setting >= CAM_SET_MAX) || (cam->mode < 0) ||
+        (cam->mode >= CAM_MODE_MAX)) {
+        return CAM_FUNC_NONE;
+    }
+
+    if (!(sCameraSettings[cam->setting].validModes & (1 << cam->mode))) {
+        return CAM_FUNC_NONE;
+    }
+
+    modes = sCameraSettings[cam->setting].cameraModes;
+
+    if (modes == NULL) {
+        return CAM_FUNC_NONE;
+    }
+
+    return modes[cam->mode].funcIdx;
+}
+
+/*
+ * An allow-list rather than a list of exclusions, and deliberately so. OoT has
+ * seventy-one camera functions and only ten of them are ordinary "follow the
+ * player around" cameras; everything else - the DEMO family, the SPEC family,
+ * most of UNIQ, all of FIXD, first person, lock-on - exists precisely because the
+ * game wants to frame something itself. Naming the handful that are safe is both
+ * shorter and fails in the right direction: a function this code has never heard
+ * of is left to vanilla instead of being driven over.
+ *
+ * The remaining families are left out on purpose:
+ *   KEEP0-4  lock-on, talking, the turn-around shot
+ *   SUBJ0-4  first person, aiming, crawlspaces
+ *   FIXD0-4  cameras pinned by the scene
+ *   DATA4    shop browsing
+ *   UNIQ0/2/3/6/7/9  door and scene transitions, prerendered rooms,
+ *            manual control, OnePoint cutscenes
+ *   DEMO0-9  cutscene cameras
+ *   SPEC0-9  hookshot flight, elevator platforms, the castle courtyard, doors
+ * along with the members of the allowed families that are Camera_Noop, which
+ * update nothing and therefore have nothing worth taking over.
+ */
+static s32 analog_cam_func_is_free(s32 func) {
+    switch (func) {
+        case CAM_FUNC_NORM1: // the standard third person follow camera
+        case CAM_FUNC_NORM2: // follow camera for the game's climbable structures
+        case CAM_FUNC_NORM3: // follow camera while riding a horse
+        case CAM_FUNC_PARA1: // holding Z with no target, and pushing or pulling blocks
+        case CAM_FUNC_JUMP1: // jumping off a ledge, and falling
+        case CAM_FUNC_JUMP2: // climbing ladders and vines
+        case CAM_FUNC_JUMP3: // swimming
+        case CAM_FUNC_BATT1: // combat
+        case CAM_FUNC_BATT4: // charging a spin attack
+        case CAM_FUNC_UNIQ1: // hanging from and climbing a ledge
+            return true;
+
+        default:
+            return false;
+    }
+}
 
 void analog_cam_post_play_update(PlayState* play) {
     Camera* cam = play->cameraPtrs[play->activeCamId];
@@ -171,9 +254,6 @@ void analog_cam_post_play_update(PlayState* play) {
 
         if (is_crawl != was_crawl) {
             skip_frames = 4;
-        }
-        if (was_crawl && !is_crawl) {
-            crawl_exit_holdoff = CRAWL_EXIT_HOLDOFF_FRAMES;
         }
         if (skip_frames > 0) {
             skip_frames--;
@@ -226,6 +306,8 @@ void analog_cam_post_play_update(PlayState* play) {
         case CAM_SET_PIVOT_IN_FRONT:
         case CAM_SET_PIVOT_CORNER:
         case CAM_SET_PIVOT_WATER_SURFACE:
+        case CAM_SET_PIVOT_VERTICAL:
+        case CAM_SET_PIVOT_FROM_SIDE:
         case CAM_SET_CRAWLSPACE:
         // Door transitions and the turn-around shot keep their setting for a few
         // frames after the scripted move ends, so cover the tail here as well as
@@ -281,29 +363,66 @@ void analog_cam_post_play_update(PlayState* play) {
     // main camera is not the one driving is a frame the game owns.
     s32 sub_camera = (play->activeCamId != CAM_ID_MAIN);
 
+    // The camera function is the check that generalises: settings and modes say
+    // where the player is and what they are doing, but the function says what
+    // the camera is doing, and every deliberately framed sequence in the game
+    // shows up here as a function outside the ordinary follow set. It is what
+    // catches the cases none of the checks above see, because they run under
+    // otherwise perfectly normal settings - cutscene cameras (CAM_SET_CS_*),
+    // the OnePoint cutscene camera, scene and door transitions, hookshot
+    // flight, the rising fire temple platforms, the castle courtyard.
+    s32 camera_func = analog_cam_active_func(cam);
+    s32 game_camera_func = !analog_cam_func_is_free(camera_func);
+
+    // CameraFuncType groups the families in order, and the boundary at
+    // CAM_FUNC_FIXD0 is the one that matters here: everything from there on -
+    // FIXD, DATA, UNIQ, DEMO, SPEC - is a camera the game places itself, while
+    // everything before it - NORM, PARA, KEEP, SUBJ, JUMP, BATT - is the follow
+    // camera in one of the states the player puts it in, lock-on and first
+    // person included. Both hand control back, but only the first is a sequence
+    // that ends with the vanilla camera flying home, so only the first arms the
+    // settle below. Arming on the second would drift the view every time the
+    // player released Z, which is worse than the freeze it would be avoiding.
+    // The one exception, CAM_FUNC_SUBJ4, is the crawlspace camera, and it has
+    // its own longer hold-off above.
+    s32 sequence_camera_func = (camera_func >= CAM_FUNC_FIXD0);
+
+    // Fading between scenes or rooms. The camera is mid-move to wherever the
+    // next scene starts, and none of the state above necessarily reflects that
+    // yet.
+    s32 transitioning =
+        (play->transitionTrigger != TRANS_TRIGGER_OFF) || (play->transitionMode != TRANS_MODE_OFF);
+
+    // Sequences the game scripts from start to finish, as opposed to states the
+    // player is simply in. Tracked separately from the rest because the vanilla
+    // camera keeps moving for a few frames after one of these ends, which is
+    // what the hold-off below waits out.
+    s32 scripted_sequence = (play->csCtx.state != CS_STATE_IDLE) || sub_camera || scripted_player ||
+                            transitioning || sequence_camera_func ||
+                            (play->gameOverCtx.state != GAMEOVER_INACTIVE);
+
     // Hand the camera back wherever the game is deliberately framing something:
-    // cutscenes (scripted or player-held), sub-cameras, the pause background,
-    // lock-on, prerendered rooms, and any camera the game has not marked active.
-    // Everywhere else the analog camera stays in control.
-    if ((play->pauseCtx.state != PAUSE_STATE_OFF) || (R_PAUSE_BG_PRERENDER_STATE != PAUSE_BG_PRERENDER_OFF) ||
-        (play->csCtx.state != CS_STATE_IDLE) || (cam->status != CAM_STAT_ACTIVE) || targeting ||
-        prerendered_background || fixed_setting || aiming_mode || scripted_player || sub_camera) {
+    // scripted sequences, any camera function outside the ordinary follow set,
+    // the pause background, lock-on, aiming, prerendered rooms, pinned settings,
+    // anything outside normal gameplay, and any camera the game has not marked
+    // active. Everywhere else the analog camera stays in control.
+    if (scripted_sequence || game_camera_func || (play->pauseCtx.state != PAUSE_STATE_OFF) ||
+        (R_PAUSE_BG_PRERENDER_STATE != PAUSE_BG_PRERENDER_OFF) || (cam->status != CAM_STAT_ACTIVE) || targeting ||
+        prerendered_background || fixed_setting || aiming_mode || (gSaveContext.gameMode != GAMEMODE_NORMAL)) {
+        if (scripted_sequence) {
+            sequence_exit_holdoff = SEQUENCE_EXIT_HOLDOFF_FRAMES;
+        }
         analog_cam_engaged = false;
         return;
     }
 
-    // B37: the crawlspace-exit hold-off. Reaching this point means the camera
-    // setting is back to normal, but the vanilla camera is still flying home and
-    // the exit animation may still be running. Restart the window while the
-    // scripted crawl move holds the player (PLAYER_STATE2_CRAWLING covers the
-    // whole move, exit animation included), so the countdown only runs on frames
-    // the player actually has control.
-    if (crawl_exit_holdoff > 0) {
-        if (player->stateFlags2 & PLAYER_STATE2_CRAWLING) {
-            crawl_exit_holdoff = CRAWL_EXIT_HOLDOFF_FRAMES;
-        } else {
-            crawl_exit_holdoff--;
-        }
+    // The settle window. Reaching this point means the sequence is over and the
+    // player has control again - scripted_player is one of the things that arms
+    // this, and it covers the whole of a scripted move including its exit
+    // animation, so the countdown never runs on a frame the player is still
+    // being puppeted - but the vanilla camera may still be swinging home.
+    if (sequence_exit_holdoff > 0) {
+        sequence_exit_holdoff--;
         analog_cam_engaged = false;
         return;
     }

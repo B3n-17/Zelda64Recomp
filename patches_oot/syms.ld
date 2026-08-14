@@ -9,6 +9,10 @@ recomp_load_overlays = 0x8F000090;
    ../patches/syms.ld exactly: they identify one shared, game agnostic
    implementation in src/game/recomp_api.cpp, registered once for both games. */
 recomp_get_analog_cam_enabled = 0x8F000098;
+/* The window's aspect ratio, or the game's own if the player left the setting on
+   Original. Used by the transition patches to grow the wipe and circle meshes so
+   they still reach the edges of a widened field of view. */
+recomp_get_target_aspect_ratio = 0x8F00001C;
 recomp_get_camera_inputs = 0x8F00009C;
 recomp_get_analog_inverted_axes = 0x8F0000B0;
 recomp_get_targeting_mode = 0x8F00002C;

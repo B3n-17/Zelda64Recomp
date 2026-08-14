@@ -28,10 +28,23 @@
  * are exported and take effect on the next View_Apply, so each one is a one-line
  * fix once it is identified.
  *
- * The pause menu and file select are likewise not special-cased. Both drive a view
- * of their own whose eye jumps around every frame, so the heuristic answers "cut"
- * throughout and the menus simply do not interpolate, which is what they did at
- * the console refresh rate anyway.
+ * File select is special-cased, because leaving it to the heuristic is actively
+ * wrong rather than merely unsmooth. FileSelect_*Draw applies three perspective
+ * views per frame: one at the orbiting eye that draws the sky, then two at
+ * (0, 0, 64) for the menu geometry. Feeding that alternation to a predictor keyed
+ * on one previous position makes the orbit view miss by its full ~1414-unit radius
+ * every frame, so the sky's projection is tagged "cut" and freezes at 20 Hz - while
+ * the skybox's own modelview matrix, which is untagged and so falls to RT64's
+ * G_EX_ID_AUTO matching, keeps interpolating and follows the eye smoothly. Two
+ * transforms that have to agree disagreeing at 20 Hz is what the jitter is; it is
+ * worse than either answer applied consistently. FileSelect_SetView below forces
+ * the interpolating answer and, via force_camera_ignore_tracking, keeps its three
+ * views out of the predictor's state entirely so they cannot poison the gameplay
+ * camera's history either. This is what ../patches/camera_transform_tagging.c does.
+ *
+ * The pause menu is still not special-cased. KaleidoScope_SetView has the same
+ * shape and MM patches it the same way, but nothing there is paired with an
+ * untagged transform the way the sky is, so it is choppy rather than wrong.
  */
 #include "patches.h"
 #include "transform_ids.h"
@@ -40,6 +53,8 @@
 #include "view.h"
 #include "z_lib.h"
 
+#include "file_select_state.h"
+
 s32 View_ApplyPerspective(View* view);
 s32 View_ApplyOrtho(View* view);
 
@@ -47,6 +62,7 @@ s32 View_ApplyOrtho(View* view);
 
 static s32 camera_interpolation_forced = false;
 static s32 camera_skip_interpolation_forced = false;
+static s32 camera_ignore_tracking = false;
 
 void force_camera_interpolation(void) {
     camera_interpolation_forced = true;
@@ -54,6 +70,23 @@ void force_camera_interpolation(void) {
 
 void force_camera_skip_interpolation(void) {
     camera_skip_interpolation_forced = true;
+}
+
+void force_camera_ignore_tracking(void) {
+    camera_ignore_tracking = true;
+}
+
+/*
+ * The verdict the last View_Apply reached, for transforms drawn under that camera
+ * that have to make the same call. The skybox is the one that does: it is drawn at
+ * the eye, so its matrix and the projection describe the same motion and have to
+ * be interpolated or not together. Read it after the view is applied and before
+ * the next one, which is where Skybox_Draw sits.
+ */
+static s32 camera_skipped = false;
+
+s32 camera_was_skipped(void) {
+    return camera_skipped;
 }
 
 static s32 should_interpolate_perspective(Vec3f* eye, Vec3f* at) {
@@ -122,9 +155,16 @@ RECOMP_PATCH s32 View_Apply(View* view, s32 mask) {
         ret = View_ApplyPerspective(view);
 
         // @recomp Only a perspective view is a camera; an ortho one is UI, and is
-        // in the same place every frame by construction.
-        interpolate_camera = should_interpolate_perspective(&view->eye, &view->at);
+        // in the same place every frame by construction. A view that asked to be
+        // ignored is left out of the predictor's history as well as its verdict,
+        // so a menu drawing several views a frame does not overwrite the position
+        // the gameplay camera is being predicted from.
+        if (!camera_ignore_tracking) {
+            interpolate_camera = should_interpolate_perspective(&view->eye, &view->at);
+        }
     }
+
+    camera_ignore_tracking = false;
 
     // @recomp Overrides, for code that already knows what the heuristic is trying
     // to work out. Skip wins over force: it is the safe answer.
@@ -136,6 +176,12 @@ RECOMP_PATCH s32 View_Apply(View* view, s32 mask) {
 
     camera_interpolation_forced = false;
     camera_skip_interpolation_forced = false;
+
+    // @recomp Publish the verdict for anything drawn under this view that has to
+    // match it. An ortho view leaves this reading "skipped", since it never
+    // reaches a verdict of its own; that is harmless because the one reader,
+    // Skybox_Draw, is always preceded by the perspective view it belongs to.
+    camera_skipped = !interpolate_camera;
 
     // @recomp Tag the projection matrix in both lists. The tile component keeps
     // interpolating either way so that scrolling textures do not stutter on the
@@ -166,4 +212,37 @@ RECOMP_PATCH s32 View_Apply(View* view, s32 mask) {
     CLOSE_DISPS(gfxCtx, TAG_FILE, 0);
 
     return ret;
+}
+
+/*
+ * Verbatim copy of z_file_choose.c's original, plus the two @recomp lines, because
+ * RECOMP_PATCH replaces the whole function.
+ *
+ * All three of the views this applies per frame get the same treatment. The orbit
+ * view is the one that matters - it is the sky's projection, and the one the
+ * predictor gets wrong - but the menu views are applied from the same function, and
+ * letting them keep writing the predictor's prev_eye is exactly what makes the
+ * orbit view mispredict. Both halves have to go together.
+ */
+RECOMP_PATCH void FileSelect_SetView(FileSelectState* this, f32 eyeX, f32 eyeY, f32 eyeZ) {
+    Vec3f eye;
+    Vec3f lookAt;
+    Vec3f up;
+
+    eye.x = eyeX;
+    eye.y = eyeY;
+    eye.z = eyeZ;
+
+    lookAt.x = lookAt.y = lookAt.z = 0.0f;
+
+    up.x = up.z = 0.0f;
+    up.y = 1.0f;
+
+    // @recomp The file select drives its own camera; the heuristic has nothing to
+    // work out here and gets it wrong when it tries.
+    force_camera_interpolation();
+    force_camera_ignore_tracking();
+
+    View_LookAt(&this->view, &eye, &lookAt, &up);
+    View_Apply(&this->view, VIEW_ALL | VIEW_FORCE_VIEWING | VIEW_FORCE_VIEWPORT | VIEW_FORCE_PROJECTION_PERSPECTIVE);
 }

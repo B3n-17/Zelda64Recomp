@@ -37,3 +37,12 @@ extern "C" void recomp_get_analog_inverted_axes(uint8_t* rdram, recomp_context* 
     *x_out = 0;
     *y_out = 0;
 }
+
+// 0xFFFF is "nothing pending", which is the only answer a target without the
+// debug warp menu can give. The real one is in src/game/debug.cpp, which reaches
+// into the warp lists and the RmlUi menu that sets them and so cannot be compiled
+// here. Without this the standalone target does not link at all: debug_warp_update
+// in patches_oot/debug_patches.c imports the symbol unconditionally.
+extern "C" void recomp_get_pending_warp(uint8_t* rdram, recomp_context* ctx) {
+    _return<u16>(ctx, 0xFFFF);
+}

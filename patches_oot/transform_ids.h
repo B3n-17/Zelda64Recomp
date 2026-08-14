@@ -76,6 +76,11 @@
 
 #define CAMERA_TRANSFORM_ID 0x10U
 
+/* One skybox is drawn at a time, so one id. Numbered to match Majora's Mask's
+ * SKYBOX_TRANSFORM_ID_START, which reserves a range there because its skybox draw
+ * emits several. */
+#define SKYBOX_TRANSFORM_ID 0x100U
+
 /*
  * 256 limbs is above every skeleton in the game (Link has 22), and each actor gets
  * that twice: one id per limb for the limb's own matrix, and a second for whatever
@@ -125,6 +130,23 @@ void register_base_actor_extensions(void);
  */
 void force_camera_interpolation(void);
 void force_camera_skip_interpolation(void);
+
+/*
+ * "Do not let this view into the predictor at all." The predictor keeps a single
+ * previous eye and at, so a menu that applies several unrelated views per frame
+ * would otherwise leave the last of them as the position the next real camera
+ * frame is predicted from. Pair it with one of the two above, since a view that
+ * skips tracking never produces a verdict of its own.
+ */
+void force_camera_ignore_tracking(void);
+
+/*
+ * Whether the last View_Apply tagged its projection as a cut. For transforms that
+ * are drawn under a camera and describe the same motion it does - the skybox, which
+ * sits at the eye - and so have to be interpolated or frozen along with it rather
+ * than deciding separately.
+ */
+s32 camera_was_skipped(void);
 
 /* The current actor being drawn by Actor_Draw, or NULL outside one. This is what
  * the SkelAnime patches tag against; see actor_transform_tagging.c for why it is

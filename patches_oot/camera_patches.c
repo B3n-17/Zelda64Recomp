@@ -50,17 +50,8 @@
 
 extern Input* D_8012D1F8;
 void Play_Update(PlayState* this);
-void combo_ledger_debug_input(PlayState* play);
-void combo_checks_update(PlayState* play);
-void combo_hydrate_update(PlayState* play);
-void combo_slots_update(PlayState* play);
-void combo_quiet_update(PlayState* play);
-void combo_counters_update(PlayState* play);
-void combo_handover_update(PlayState* play);
-void combo_debug_update(PlayState* play);
-void combo_respawn_update(PlayState* play);
-void combo_trap_update(PlayState* play);
 void Play_Draw(PlayState* this);
+void debug_warp_update(PlayState* play);
 
 // Copied from z_camera_data.inc.c, which is #included into z_camera.c rather than
 // being a header, so these types are not reachable any other way.
@@ -647,53 +638,10 @@ RECOMP_PATCH void Play_Main(GameState* thisx) {
         // orientation while it is inactive.
         analog_cam_post_play_update(this);
 
-        // @recomp Combo payload's per-frame hooks; see combo_hydrate.c,
-        // combo_handover.c and combo_ledger.c. Sharing this patch rather than
-        // adding another whole-function copy of Play_Main, since RECOMP_PATCH
-        // replaces the entire function it targets.
-        //
-        // Where the player is, which is only an observation and so is taken before
-        // anything acts. combo_checks.c keeps the last scene that was not the
-        // grotto scene, because that is the only thing that says which of the
-        // eight identical scrub grottos the player dropped into (T6.11).
-        combo_checks_update(this);
-        // And where the player *was*, which is the same kind of observation and
-        // has the same reason to be taken before anything acts: the dungeon
-        // record is read off the void respawn as it stood a frame ago, so the
-        // frame a dungeon loads on must see it before anything overwrites it
-        // (B7c).
-        combo_respawn_update(this);
-        // Hydration first: it is the run's items arriving, and everything below it
-        // is a trigger acting on a game that should already have them.
-        combo_hydrate_update(this);
-        // Then the counter snapshot, which pushes on a scene change. After
-        // hydration so that the first push of a resumed run is taken of the save
-        // the fold has finished filling in rather than of the one before it.
-        combo_counters_update(this);
-        // Then the handover: the arrival left over from one, if the game came
-        // back somewhere other than where it was parked, and then the player
-        // setting off through a crossing.
-        combo_handover_update(this);
-        // Then the shared slots, which remember every item that has landed in one
-        // of the four slots that hold more than one thing. After hydration, which
-        // is what can have just granted one of them.
-        combo_slots_update(this);
-        // Then the traps (B8), which is the one hook here that acts on the player
-        // rather than on the save. After hydration for a reason of its own: the
-        // frame a trap is armed on is a frame the player is inside a cutscene, so
-        // the earliest this can ever fire is the frame after, and running it late
-        // costs nothing.
-        combo_trap_update(this);
-        // Then the two interruptions this build does without: the owls that
-        // lecture and Navi's forced hints.
-        combo_quiet_update(this);
-        // The R+A+B chord, an age switch since the F62 addendum; the item-grant
-        // and Z+A+B handover chords went entirely when it was re-armed.
-        combo_ledger_debug_input(this);
-        // Last, because it is the one that can end this play state: the debug
-        // menu's warp re-enters Play_Init from the top, so everything above it
-        // would otherwise be acting on a frame that is being thrown away.
-        combo_debug_update(this);
+        // @recomp Last, because it is the one hook here that can end this play
+        // state: the debug menu's warp re-enters Play_Init from the top, so
+        // anything after it would be acting on a frame that is being thrown away.
+        debug_warp_update(this);
     }
 
     PLAY_LOG(4583);

@@ -8,9 +8,18 @@
 *.elf
 *.z64
 
+# Local Ocarina of Time decomp checkout, which patches_oot builds against.
+# Deliberately not vendored as a submodule: the OoT patches include generated
+# headers from its build/ and extracted/ directories, so it has to be a decomp
+# that has actually been built, which is gigabytes of artifacts rather than
+# something a clone can provide. See OOT_DIR in patches_oot/Makefile.
+/lib/oot-decomp/
+
 # Output C files
 RecompiledFuncs/
 RecompiledPatches/
+RecompiledFuncsOoT/
+RecompiledPatchesOoT/
 
 # Linux build output
 build*/
@@ -66,3 +75,5 @@ RSPRecomp
 .idea
 build-*
 cmake-build-*
+# Local runtime data (saves, config) produced by running from the repo root.
+oot_recomp_data/

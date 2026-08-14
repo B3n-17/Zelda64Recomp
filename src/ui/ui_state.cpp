@@ -180,7 +180,7 @@ public:
     UIState(UIState&& rhs) = delete;
     UIState& operator=(UIState&& rhs) = delete;
 
-    UIState(SDL_Window* window, RT64::RenderInterface* interface, RT64::RenderDevice* device) {
+    UIState(SDL_Window* window, plume::RenderInterface* interface, plume::RenderDevice* device) {
         launcher_menu_controller = recompui::create_launcher_menu();
         config_menu_controller = recompui::create_config_menu();
 
@@ -446,7 +446,7 @@ inline const std::string read_file_to_string(std::filesystem::path path) {
     return ss.str(); 
 }
 
-void init_hook(RT64::RenderInterface* interface, RT64::RenderDevice* device) {
+void init_hook(plume::RenderInterface* interface, plume::RenderDevice* device) {
 #if defined(__linux__)
     std::locale::global(std::locale::classic());
 #endif
@@ -548,7 +548,7 @@ void recompui::activate_mouse() {
     ui_state->update_focus(true, false);
 }
 
-void draw_hook(RT64::RenderCommandList* command_list, RT64::RenderFramebuffer* swap_chain_framebuffer) {
+void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer* swap_chain_framebuffer) {
 
     apply_background_input_mode();
 
@@ -556,6 +556,8 @@ void draw_hook(RT64::RenderCommandList* command_list, RT64::RenderFramebuffer* s
     if (!ui_state) {
         return;
     }
+
+    recompui::update_debug_availability();
 
     // Return to the launcher if no menu is open and the game isn't started.
     if (!recompui::is_any_context_shown() && !ultramodern::is_game_started()) {

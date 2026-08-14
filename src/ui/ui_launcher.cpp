@@ -10,19 +10,51 @@
 static std::string version_string;
 
 Rml::DataModelHandle model_handle;
-bool mm_rom_valid = false;
+
+// Validity of the ROM for the game the launcher currently has selected, not for
+// Majora's Mask specifically. Both halves of the launcher bind to it, and it is
+// re-evaluated whenever the selection changes.
+bool rom_valid = false;
+bool oot_selected = false;
 
 extern std::vector<recomp::GameEntry> supported_games;
+
+// Index into supported_games for the half of the launcher that is selected.
+// Majora's Mask is always entry 0; Ocarina of Time is entry 1 when the build has
+// it (see RECOMP_OOT in the root CMakeLists), and absent otherwise.
+static size_t selected_game_index() {
+    if (oot_selected && supported_games.size() > 1) {
+        return 1;
+    }
+    return 0;
+}
+
+static recomp::GameEntry& selected_game() {
+    return supported_games[selected_game_index()];
+}
+
+std::string recompui::get_selected_mod_game_id() {
+    return selected_game().mod_game_id;
+}
+
+// Re-reads whether the selected game has a valid stored ROM and pushes it to the
+// UI. Called on startup and on every switch between the two halves.
+static void refresh_rom_valid() {
+    rom_valid = recomp::is_rom_valid(selected_game().game_id);
+    if (model_handle) {
+        model_handle.DirtyVariable("rom_valid");
+    }
+}
 
 void select_rom() {
     nfdnchar_t* native_path = nullptr;
     zelda64::open_file_dialog([](bool success, const std::filesystem::path& path) {
         if (success) {
-            recomp::RomValidationError rom_error = recomp::select_rom(path, supported_games[0].game_id);
+            recomp::RomValidationError rom_error = recomp::select_rom(path, selected_game().game_id);
             switch (rom_error) {
                 case recomp::RomValidationError::Good:
-                    mm_rom_valid = true;
-                    model_handle.DirtyVariable("mm_rom_valid");
+                    rom_valid = true;
+                    model_handle.DirtyVariable("rom_valid");
                     break;
                 case recomp::RomValidationError::FailedToOpen:
                     recompui::message_box("Failed to open ROM file.");
@@ -57,7 +89,7 @@ recompui::ContextId recompui::get_launcher_context_id() {
 class LauncherMenu : public recompui::MenuController {
 public:
     LauncherMenu() {
-        mm_rom_valid = recomp::is_rom_valid(supported_games[0].game_id);
+        refresh_rom_valid();
     }
     ~LauncherMenu() override {
 
@@ -73,14 +105,39 @@ public:
         );
         recompui::register_event(listener, "rom_selected",
             [](const std::string& param, Rml::Event& event) {
-                mm_rom_valid = true;
-                model_handle.DirtyVariable("mm_rom_valid");
+                rom_valid = true;
+                model_handle.DirtyVariable("rom_valid");
             }
         );
         recompui::register_event(listener, "start_game",
             [](const std::string& param, Rml::Event& event) {
-                recomp::start_game(supported_games[0].game_id);
+                const recomp::GameEntry& game = selected_game();
+                printf("Starting %s\n", reinterpret_cast<const char*>(game.game_id.c_str()));
+                recomp::start_game(game.game_id);
                 recompui::hide_all_contexts();
+            }
+        );
+        // The two title buttons act as a switch between the halves of the
+        // launcher. Each half's menu is bound to oot_selected, so flipping it
+        // moves the menu and the highlight together.
+        recompui::register_event(listener, "select_oot",
+            [](const std::string& param, Rml::Event& event) {
+                if (oot_selected) {
+                    return;
+                }
+                oot_selected = true;
+                model_handle.DirtyVariable("oot_selected");
+                refresh_rom_valid();
+            }
+        );
+        recompui::register_event(listener, "select_mm",
+            [](const std::string& param, Rml::Event& event) {
+                if (!oot_selected) {
+                    return;
+                }
+                oot_selected = false;
+                model_handle.DirtyVariable("oot_selected");
+                refresh_rom_valid();
             }
         );
         recompui::register_event(listener, "open_controls",
@@ -113,7 +170,13 @@ public:
     void make_bindings(Rml::Context* context) override {
         Rml::DataModelConstructor constructor = context->CreateDataModel("launcher_model");
 
-        constructor.Bind("mm_rom_valid", &mm_rom_valid);
+        constructor.Bind("rom_valid", &rom_valid);
+        constructor.Bind("oot_selected", &oot_selected);
+
+        // False in an MM-only build, where the Ocarina of Time title keeps its
+        // original disabled "Coming Soon" treatment rather than becoming a switch.
+        static bool oot_available = supported_games.size() > 1;
+        constructor.Bind("oot_available", &oot_available);
 
         version_string = recomp::get_project_version().to_string();
         constructor.Bind("version_number", &version_string);

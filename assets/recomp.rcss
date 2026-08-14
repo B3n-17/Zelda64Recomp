@@ -1969,6 +1969,7 @@ scrollbarhorizontal sliderbar {
   justify-content: flex-start;
   transform: translateX(0dp);
   animation: 25s cubic-out 1 slide-mm-bg-over;
+  pointer-events: none;
 }
 
 @keyframes fade-mm-in {

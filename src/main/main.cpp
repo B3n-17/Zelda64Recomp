@@ -36,6 +36,9 @@
 #include "zelda_game.h"
 #include "recomp_data.h"
 #include "ovl_patches.hpp"
+#ifdef RECOMP_CRASH_HANDLER
+#include "../main_oot/crash_handler_oot.hpp"
+#endif
 #include "librecomp/game.hpp"
 #include "librecomp/mods.hpp"
 #include "librecomp/helpers.hpp"
@@ -330,12 +333,39 @@ void reset_audio(uint32_t output_freq) {
 extern RspUcodeFunc njpgdspMain;
 extern RspUcodeFunc aspMain;
 
+#ifdef RECOMP_OOT
+// OoT's audio and jpeg microcode differ from MM's, so each game gets its own
+// recompiled copy. The `oot_` prefix is applied by output_function_name in
+// aspMain.oot.ntsc-1.0.toml / njpgdspMain.oot.ntsc-1.0.toml, for the same reason
+// the recompiled game functions carry it: both copies live in one executable.
+extern RspUcodeFunc oot_njpgdspMain;
+extern RspUcodeFunc oot_aspMain;
+#endif
+
 RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
+#ifdef RECOMP_OOT
+    // Which recompiled microcode to run depends on which game is running. This is
+    // only ever called once a game has started, so current_game_id is set.
+    const bool is_oot = recomp::current_game_id() == u8"oot.n64.us.1.0";
+#else
+    constexpr bool is_oot = false;
+#endif
+
     switch (task->t.type) {
     case M_AUDTASK:
+#ifdef RECOMP_OOT
+        if (is_oot) {
+            return oot_aspMain;
+        }
+#endif
         return aspMain;
 
     case M_NJPEGTASK:
+#ifdef RECOMP_OOT
+        if (is_oot) {
+            return oot_njpgdspMain;
+        }
+#endif
         return njpgdspMain;
 
     default:
@@ -346,6 +376,44 @@ RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
 
 extern "C" void recomp_entrypoint(uint8_t * rdram, recomp_context * ctx);
 gpr get_entrypoint_address();
+
+#ifdef RECOMP_OOT
+// Prefixed by func_prefix in oot.us.ntsc-1.0.toml so it does not collide with
+// MM's recomp_entrypoint.
+extern "C" void oot_recomp_entrypoint(uint8_t * rdram, recomp_context * ctx);
+
+namespace oot {
+    void register_overlays();
+    void register_patches();
+}
+
+// Installed when OoT starts rather than at program startup. Both games' section
+// tables are keyed by rom and ram address and would collide, so librecomp holds
+// only the running game's; see GameEntry::register_tables_callback.
+static void register_oot_tables() {
+    oot::register_overlays();
+    oot::register_patches();
+
+    // OoT tags its transforms (patches_oot/actor_transform_tagging.c and
+    // camera_transform_tagging.c), so the high framerate options apply to it on
+    // the same terms as to MM and the refresh rate config is left alone.
+    //
+    // Reset the actor extension registry for this game's boot. Both games claim
+    // extension slots from the one registry, and the runtime refuses a claim once
+    // any actor holds data - so without this, an OoT boot that followed an MM one
+    // in the same process would abort in register_base_actor_extensions.
+    recomputil::init_extended_actor_data();
+}
+#endif
+
+static void register_mm_tables() {
+    zelda64::register_overlays();
+    zelda64::register_patches();
+
+    // Same reason as the OoT side: a fresh registry per game boot, so whichever
+    // game starts second can still claim its extension slots.
+    recomputil::init_extended_actor_data();
+}
 
 // array of supported GameEntry objects
 std::vector<recomp::GameEntry> supported_games = {
@@ -360,7 +428,32 @@ std::vector<recomp::GameEntry> supported_games = {
         .has_compressed_code = true,
         .entrypoint_address = get_entrypoint_address(),
         .entrypoint = recomp_entrypoint,
+        .register_tables_callback = register_mm_tables,
     },
+#ifdef RECOMP_OOT
+    {
+        // The retail NTSC 1.0 cartridge, which is what a user actually has. The
+        // recompiler ran against the decomp's uncompressed build, but that does not
+        // need to be the rom supplied here: both games' patches hand
+        // recomp_load_overlays *vrom* addresses, which are identical in either
+        // layout, and the game's own DmaMgr decompresses files at runtime exactly as
+        // it does on hardware. This mirrors MM, which likewise takes a retail rom.
+        .rom_hash = 0x9C427099CC30D135ULL,
+        .internal_name = "THE LEGEND OF ZELDA",
+        .game_id = u8"oot.n64.us.1.0",
+        .mod_game_id = "oot",
+        .save_type = recomp::SaveType::Sram,
+        .is_enabled = false,
+        .decompression_routine = zelda64::decompress_oot,
+        // Only consulted for mod function hooking, which needs the uncompressed
+        // layout the recompiler saw; the base game runs straight off the rom above.
+        .has_compressed_code = true,
+        // OoT boots at 0x80000400; MM boots at 0x80080000.
+        .entrypoint_address = (gpr)(int32_t)0x80000400,
+        .entrypoint = oot_recomp_entrypoint,
+        .register_tables_callback = register_oot_tables,
+    },
+#endif
 };
 
 // TODO: move somewhere else
@@ -571,6 +664,11 @@ void reorder_texture_pack(recomp::mods::ModContext&) {
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
+#ifdef RECOMP_CRASH_HANDLER
+    // Diagnostic builds only (RECOMP_CONSOLE). Installed first: a fault otherwise
+    // kills the process with no output at all.
+    register_crash_handler();
+#endif
     recomp::Version project_version{};
     if (!recomp::Version::from_string(version_string, project_version)) {
         ultramodern::error_handling::message_box(("Invalid version string: " + version_string).c_str());
@@ -673,8 +771,10 @@ int main(int argc, char** argv) {
     recompui::register_ui_exports();
     recomputil::register_data_api_exports();
 
-    zelda64::register_overlays();
-    zelda64::register_patches();
+    // Overlay and patch tables are no longer registered here. Each game installs
+    // its own from GameEntry::register_tables_callback when it starts, because
+    // MM's and OoT's tables are keyed by overlapping rom and ram addresses and
+    // only one game's can be live at a time.
     recomputil::init_extended_actor_data();
     zelda64::load_config();
 

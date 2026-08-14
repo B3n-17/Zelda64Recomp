@@ -10,13 +10,15 @@ ifeq ($(origin LD),default)
 LD := ld.lld
 endif
 
-# Path to the zeldaret/oot decomp checkout.
-OOT_DIR ?= ../../oot
+# Path to a BUILT zeldaret/oot decomp checkout. A clone is not enough: the patches
+# include generated headers from $(OOT_DIR)/build/$(OOT_VERSION_DIR) and
+# $(OOT_DIR)/extracted/$(OOT_VERSION_DIR), which only exist after
+# `make VERSION=ntsc-1.0 REGION=US` has been run in it.
+#
+# Defaults into the repo, beside lib/mm-decomp, so a self-contained checkout needs
+# no override. Point somewhere else with `make OOT_DIR=/path/to/oot`.
+OOT_DIR ?= ../lib/oot-decomp
 OOT_VERSION_DIR ?= ntsc-1.0
-
-# Path to the combo mod checkout, whose shared/ holds the headers compiled into
-# both patch trees.
-COMBO_DIR ?= ../../combo-mod
 
 # -fno-jump-tables is required, not an optimization choice. A switch compiled to a
 # jump table emits an array of code addresses into .rodata with R_MIPS_32
@@ -40,9 +42,18 @@ CPPFLAGS := -nostdinc -D_LANGUAGE_C -DMIPS \
 			-DDEBUG_FEATURES=0 -DNDEBUG -DF3DEX_GBI_2 \
 			-I $(OOT_DIR) -I $(OOT_DIR)/include -I $(OOT_DIR)/include/libc -I $(OOT_DIR)/src \
 			-I $(OOT_DIR)/extracted/$(OOT_VERSION_DIR) -I $(OOT_DIR)/build/$(OOT_VERSION_DIR) \
-			-I ../lib/rt64/include -I $(COMBO_DIR)/shared
+			-I ../lib/rt64/include
 
 LDFLAGS  := -nostdlib -T patches.ld -T syms.ld -Map patches.map --unresolved-symbols=ignore-all --emit-relocs
+
+# Say which of the two is missing rather than letting clang emit a thousand
+# "file not found" lines, which is what a wrong OOT_DIR looks like otherwise.
+ifeq ($(wildcard $(OOT_DIR)/include/ultra64.h),)
+$(error OoT decomp not found at OOT_DIR=$(OOT_DIR). Clone zeldaret/oot there, or pass OOT_DIR=/path/to/oot)
+endif
+ifeq ($(wildcard $(OOT_DIR)/build/$(OOT_VERSION_DIR)),)
+$(error OoT decomp at OOT_DIR=$(OOT_DIR) has not been built. Run `make VERSION=$(OOT_VERSION_DIR) REGION=US` in it first)
+endif
 
 C_SRCS := $(wildcard *.c)
 C_OBJS := $(C_SRCS:.c=.o)
@@ -51,8 +62,12 @@ C_DEPS := $(C_SRCS:.c=.d)
 $(TARGET): $(C_OBJS) patches.ld syms.ld
 	$(LD) $(C_OBJS) $(LDFLAGS) -o $@
 
+# -MP emits a phony target for every header, so a header that moves or disappears
+# rebuilds the object instead of stopping the build with "No rule to make target".
+# The dep files record absolute paths into OOT_DIR, so without it, pointing
+# OOT_DIR somewhere new fails until the stale .d files are deleted by hand.
 $(C_OBJS): %.o : %.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) $< -MMD -MF $(@:.o=.d) -c -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< -MMD -MP -MF $(@:.o=.d) -c -o $@
 
 clean:
 	rm -rf $(C_OBJS) $(TARGET) $(C_DEPS)

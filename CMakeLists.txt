@@ -19,6 +19,16 @@ endif()
 # Opt out of constexpr mutex constructor on windows to prevent vcredist issues
 if (WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+
+    # SDL_endian.h carries a workaround, written for Clang 11, that defines
+    # _m_prefetch itself under _MSC_VER and guards it with __PRFCHWINTRIN_H.
+    # Recent Clang makes _m_prefetch a real builtin, so that definition is now a
+    # hard error ("definition of builtin function"), not a warning we could demote.
+    # Predefining the guard makes SDL skip its version; the builtin stays callable
+    # because Clang implicitly declares builtins without the header. This hits both
+    # SDL copies in the build - rt64's bundled one and the fetched 2.30.3 - so it
+    # has to be global rather than scoped to one target.
+    add_compile_definitions(__PRFCHWINTRIN_H)
 endif()
 
 if (APPLE)
@@ -47,6 +57,11 @@ add_compile_definitions(HLSL_CPU)
 
 if (RECOMP_FLATPAK)
     add_compile_definitions(RECOMP_FLATPAK)
+endif()
+
+# Disable Apple Retina display support in plume (Zelda doesn't support retina yet)
+if (APPLE)
+    set(APPLE_RETINA_ENABLED OFF CACHE BOOL "" FORCE)
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/rt64 ${CMAKE_BINARY_DIR}/rt64)
@@ -120,11 +135,37 @@ if(NOT DEFINED PATCHES_LD)
     set(PATCHES_LD ld.lld)
 endif()
 
-add_custom_target(PatchesBin
-    COMMAND ${CMAKE_COMMAND} -E env CC=${PATCHES_C_COMPILER} LD=${PATCHES_LD} make
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/patches
-    BYPRODUCTS ${CMAKE_SOURCE_DIR}/patches/patches.elf
-)
+# The patch payloads are built by a Makefile with a mips clang toolchain, which a
+# Windows checkout generally does not have. Without make the step is skipped and
+# the already generated output in RecompiledPatches/ is used as-is.
+find_program(PATCHES_MAKE make)
+
+# Likewise for the recompiler itself. The name is spelled out per platform rather
+# than looked up with find_program: on Windows that happily matches the
+# extensionless Linux N64Recomp sitting at the repo root, which then fails as
+# "not recognized as an internal or external command" only once ninja runs it.
+if (WIN32)
+    set(N64RECOMP_NAME N64Recomp.exe)
+else()
+    set(N64RECOMP_NAME N64Recomp)
+endif()
+
+if (EXISTS ${CMAKE_SOURCE_DIR}/${N64RECOMP_NAME})
+    set(N64RECOMP_EXECUTABLE ${CMAKE_SOURCE_DIR}/${N64RECOMP_NAME})
+else()
+    set(N64RECOMP_EXECUTABLE "")
+    message(STATUS "${N64RECOMP_NAME} not found at the repo root: using the existing recompiled patch output")
+endif()
+
+if (PATCHES_MAKE)
+    add_custom_target(PatchesBin
+        COMMAND ${CMAKE_COMMAND} -E env CC=${PATCHES_C_COMPILER} LD=${PATCHES_LD} ${PATCHES_MAKE}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/patches
+        BYPRODUCTS ${CMAKE_SOURCE_DIR}/patches/patches.elf
+    )
+else()
+    message(STATUS "make not found: using the existing patch binaries instead of rebuilding them")
+endif()
 
 # Generate patches_bin.c from patches.bin
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/RecompiledPatches/patches_bin.c
@@ -133,16 +174,112 @@ add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/RecompiledPatches/patches_bin.c
 )
 
 # Recompile patches elf into patches.c and patches.bin
-add_custom_command(OUTPUT
-                       ${CMAKE_SOURCE_DIR}/patches/patches.bin
-                       ${CMAKE_SOURCE_DIR}/RecompiledPatches/patches.c
-                       ${CMAKE_SOURCE_DIR}/RecompiledPatches/recomp_overlays.inl
-                       ${CMAKE_SOURCE_DIR}/RecompiledPatches/funcs.h
-                   # TODO: Look into why modifying patches requires two builds to take
-                   COMMAND ./N64Recomp patches.toml
-                   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                   DEPENDS ${CMAKE_SOURCE_DIR}/patches/patches.elf
-)
+if (N64RECOMP_EXECUTABLE)
+    add_custom_command(OUTPUT
+                           ${CMAKE_SOURCE_DIR}/patches/patches.bin
+                           ${CMAKE_SOURCE_DIR}/RecompiledPatches/patches.c
+                           ${CMAKE_SOURCE_DIR}/RecompiledPatches/recomp_overlays.inl
+                           ${CMAKE_SOURCE_DIR}/RecompiledPatches/funcs.h
+                       # TODO: Look into why modifying patches requires two builds to take
+                       COMMAND ${N64RECOMP_EXECUTABLE} patches.toml
+                       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                       DEPENDS ${CMAKE_SOURCE_DIR}/patches/patches.elf
+    )
+endif()
+
+# ---------------------------------------------------------------------------
+# Ocarina of Time
+#
+# Linked into the same executable as Majora's Mask. Every recompiled OoT symbol
+# carries an `oot_` prefix (func_prefix in oot.us.ntsc-1.0.toml), so the two
+# games' shared decomp function names no longer collide at link time.
+#
+# Defaults to on when the recompiler output is present. A checkout without it
+# still configures, it just builds the MM-only launcher.
+if (EXISTS ${CMAKE_SOURCE_DIR}/RecompiledFuncsOoT/funcs.h)
+    option(RECOMP_OOT "Build Ocarina of Time support into the launcher" ON)
+else()
+    option(RECOMP_OOT "Build Ocarina of Time support into the launcher" OFF)
+endif()
+
+if (RECOMP_OOT)
+    # Primary recompiler output for OoT.
+    add_library(RecompiledFuncsOoT STATIC)
+
+    target_compile_options(RecompiledFuncsOoT PRIVATE
+        -fno-strict-aliasing
+        -Wno-unused-variable
+        -Wno-implicit-function-declaration
+    )
+
+    target_include_directories(RecompiledFuncsOoT PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/ultramodern/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/librecomp/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
+    )
+
+    file(GLOB OOT_FUNC_SOURCES ${CMAKE_SOURCE_DIR}/RecompiledFuncsOoT/*.c)
+    target_sources(RecompiledFuncsOoT PRIVATE ${OOT_FUNC_SOURCES})
+
+    # Recompiled output for the OoT patches.
+    add_library(PatchesLibOoT STATIC)
+
+    target_compile_options(PatchesLibOoT PRIVATE
+        -fno-strict-aliasing
+        -Wno-unused-variable
+        -Wno-implicit-function-declaration
+    )
+
+    target_include_directories(PatchesLibOoT PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/ultramodern/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/librecomp/include
+        ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime/N64Recomp/include
+    )
+
+    target_sources(PatchesLibOoT PRIVATE
+        ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches.c
+        ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches_bin.c
+    )
+
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
+
+    # Build the OoT patches elf, mirroring the MM steps above, and skipped without
+    # make for the same reason.
+    #
+    # Also skipped without the decomp. Unlike Majora's Mask, whose lib/mm-decomp is
+    # a submodule and always present, the OoT patches need a decomp that has been
+    # *built* - they include generated headers from its build/ and extracted/ dirs
+    # - so it cannot simply be vendored. See OOT_DIR in patches_oot/Makefile.
+    set(OOT_DECOMP_DIR ${CMAKE_SOURCE_DIR}/lib/oot-decomp)
+    if (PATCHES_MAKE AND EXISTS ${OOT_DECOMP_DIR}/build/ntsc-1.0)
+        add_custom_target(PatchesBinOoT
+            COMMAND ${CMAKE_COMMAND} -E env CC=${PATCHES_C_COMPILER} LD=${PATCHES_LD} ${PATCHES_MAKE}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/patches_oot
+            BYPRODUCTS ${CMAKE_SOURCE_DIR}/patches_oot/patches.elf
+        )
+    else()
+        message(STATUS "OoT decomp not built at ${OOT_DECOMP_DIR}: using the existing patches_oot output")
+    endif()
+
+    add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches_bin.c
+        COMMAND file_to_c ${CMAKE_SOURCE_DIR}/patches_oot/patches.bin oot_patches_bin ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches_bin.c ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches_bin.h
+        DEPENDS ${CMAKE_SOURCE_DIR}/patches_oot/patches.bin
+    )
+
+    if (N64RECOMP_EXECUTABLE)
+        add_custom_command(OUTPUT
+                               ${CMAKE_SOURCE_DIR}/patches_oot/patches.bin
+                               ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches.c
+                               ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/recomp_overlays.inl
+                               ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/funcs.h
+                           COMMAND ${N64RECOMP_EXECUTABLE} patches_oot.toml
+                           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                           DEPENDS ${CMAKE_SOURCE_DIR}/patches_oot/patches.elf
+        )
+    endif()
+endif()
 
 # Main executable
 add_executable(Zelda64Recompiled)
@@ -158,6 +295,7 @@ set (SOURCES
     ${CMAKE_SOURCE_DIR}/src/game/controls.cpp
     ${CMAKE_SOURCE_DIR}/src/game/config.cpp
     ${CMAKE_SOURCE_DIR}/src/game/scene_table.cpp
+    ${CMAKE_SOURCE_DIR}/src/game/scene_table_oot.cpp
     ${CMAKE_SOURCE_DIR}/src/game/debug.cpp
     ${CMAKE_SOURCE_DIR}/src/game/quicksaving.cpp
     ${CMAKE_SOURCE_DIR}/src/game/recomp_api.cpp
@@ -205,6 +343,20 @@ set (SOURCES
 
 if (APPLE)
     list(APPEND SOURCES ${CMAKE_SOURCE_DIR}/src/main/support_apple.mm)
+endif()
+
+if (RECOMP_OOT)
+    list(APPEND SOURCES
+        ${CMAKE_SOURCE_DIR}/src/main_oot/register_overlays_oot.cpp
+        ${CMAKE_SOURCE_DIR}/src/main_oot/register_patches_oot.cpp
+        # The libultra functions OoT calls that MM never does, plus the patch
+        # trace hook. recomp_load_overlays is deliberately not here: MM's
+        # src/game/recomp_api.cpp already defines it.
+        ${CMAKE_SOURCE_DIR}/src/main_oot/runtime_funcs_oot.cpp
+
+        ${CMAKE_SOURCE_DIR}/rsp_oot/aspMain.cpp
+        ${CMAKE_SOURCE_DIR}/rsp_oot/njpgdspMain.cpp
+    )
 endif()
 
 target_include_directories(Zelda64Recompiled PRIVATE
@@ -281,14 +433,50 @@ if (WIN32)
             "${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
             $<TARGET_FILE_DIR:Zelda64Recompiled>)
 
-    set_target_properties(
-        Zelda64Recompiled
-        PROPERTIES
-            LINK_FLAGS_DEBUG "/SUBSYSTEM:CONSOLE"
-            LINK_FLAGS_RELEASE "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
-            LINK_FLAGS_RELWITHDEBINFO "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
-            LINK_FLAGS_MINSIZEREL "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
-    )
+    # The UI loads its documents and fonts through get_asset_path, which is
+    # relative to the *working directory* on Windows (get_program_path() returns
+    # an empty path there), and the controller database is read the same way. An
+    # exe started from the build directory - which is what double-clicking it does
+    # - therefore finds no assets and dies during UI init with no window and no
+    # message. Copying both next to the exe makes it run from either place.
+    add_custom_command(TARGET Zelda64Recompiled POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:Zelda64Recompiled>/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/recompcontrollerdb.txt"
+            $<TARGET_FILE_DIR:Zelda64Recompiled>)
+
+    # A Release build normally links /SUBSYSTEM:WINDOWS, which discards stdout and
+    # stderr entirely - a startup failure shows as a black window and nothing else.
+    # RECOMP_CONSOLE keeps the console attached in Release so those diagnostics are
+    # readable. It only changes where output goes, not optimization; /DEBUG writes
+    # the PDB that turns a backtrace into recompiled function names.
+    option(RECOMP_CONSOLE "Keep a console attached in Release builds for diagnostics" OFF)
+
+    if (RECOMP_CONSOLE)
+        set_target_properties(
+            Zelda64Recompiled
+            PROPERTIES
+                LINK_FLAGS "/SUBSYSTEM:CONSOLE /DEBUG"
+        )
+        target_compile_options(Zelda64Recompiled PRIVATE /Zi)
+        # Symbolized backtrace on a fatal fault. Without it a fault in recompiled
+        # code kills the process silently, since it never reaches ultramodern's
+        # reporting paths. Dbghelp needs the PDB that /DEBUG writes above.
+        target_sources(Zelda64Recompiled PRIVATE ${CMAKE_SOURCE_DIR}/src/main_oot/crash_handler_oot.cpp)
+        target_compile_definitions(Zelda64Recompiled PRIVATE RECOMP_CRASH_HANDLER)
+        target_link_libraries(Zelda64Recompiled PRIVATE Dbghelp.lib)
+    else()
+        set_target_properties(
+            Zelda64Recompiled
+            PROPERTIES
+                LINK_FLAGS_DEBUG "/SUBSYSTEM:CONSOLE"
+                LINK_FLAGS_RELEASE "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
+                LINK_FLAGS_RELWITHDEBINFO "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
+                LINK_FLAGS_MINSIZEREL "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"
+        )
+    endif()
 
     target_sources(Zelda64Recompiled PRIVATE ${CMAKE_SOURCE_DIR}/icons/app.rc)
     target_link_libraries(Zelda64Recompiled PRIVATE SDL2 Winmm.lib)
@@ -350,6 +538,20 @@ target_link_libraries(Zelda64Recompiled PRIVATE
     nfd
     lunasvg
 )
+
+if (RECOMP_OOT)
+    target_compile_definitions(Zelda64Recompiled PRIVATE RECOMP_OOT)
+
+    # ORDER MATTERS, for the same reason it does for the MM pair above.
+    # N64Recomp's single-file-output mode relies on the linker only pulling a
+    # symbol from a static library if it is not already defined, so the patches
+    # have to be listed before the recompiled functions they override. Reversed,
+    # the patches link cleanly but are silently never used.
+    target_link_libraries(Zelda64Recompiled PRIVATE
+        PatchesLibOoT
+        RecompiledFuncsOoT
+    )
+endif()
 
 # TODO fix the rt64 CMake script so that this doesn't need to be duplicated here
 # For DXC

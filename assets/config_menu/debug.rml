@@ -42,7 +42,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="config-debug-option">
+                        <div class="config-debug-option" data-if="debug_clock_available">
                             <label
                                 class="config-debug-option__label"
                             >

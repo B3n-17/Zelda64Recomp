@@ -59,6 +59,10 @@
     justify-content: flex-start;
     transform: translateX(space(0));
     animation: 25s cubic-out 1 slide-mm-bg-over;
+    // Decoration only. It reaches 70vw past its own left edge, and because it sits
+    // in the right half - later in document order than the left half - it paints
+    // over the Ocarina of Time title and would otherwise swallow clicks on it.
+    pointer-events: none;
 }
 
 @keyframes fade-mm-in {

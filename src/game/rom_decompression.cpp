@@ -64,23 +64,11 @@ constexpr uint32_t byteswap(uint32_t val) {
 }
 #endif
 
-// Produces a decompressed MM rom. This is only needed because the game has compressed code.
-// For other recomps using this repo as an example, you can omit the decompression routine and
-// set the corresponding fields in the GameEntry if the game doesn't have compressed code,
-// even if it does have compressed data.
-std::vector<uint8_t> zelda64::decompress_mm(std::span<const uint8_t> compressed_rom) {
-    // Sanity check the rom size and header. These should already be correct from the runtime's check,
-    // but it should prevent this file from accidentally being copied to another recomp.
-    if (compressed_rom.size() != 0x2000000) {
-        assert(false);
-        return {};
-    }
-
-    if (compressed_rom[0x3B] != 'N' || compressed_rom[0x3C] != 'Z' || compressed_rom[0x3D] != 'S' || compressed_rom[0x3E] != 'E') {
-        assert(false);
-        return {};
-    }
-
+// Walks a rom's dmadata table, decompressing every yaz0 entry to its vrom address and
+// rewriting the table to describe the result. Both Zelda 64 games use the same format,
+// so only the table's location and the size of the decompressed rom differ.
+static std::vector<uint8_t> decompress_by_dmadata(std::span<const uint8_t> compressed_rom,
+                                                  size_t dma_data_rom_addr, size_t decompressed_size) {
     struct DmaDataEntry {
         uint32_t vrom_start;
         uint32_t vrom_end;
@@ -98,10 +86,8 @@ std::vector<uint8_t> zelda64::decompress_mm(std::span<const uint8_t> compressed_
     DmaDataEntry cur_entry{};
     size_t cur_entry_index = 0;
 
-    constexpr size_t dma_data_rom_addr = 0x1A500;
-
     std::vector<uint8_t> ret{};
-    ret.resize(0x2F00000);
+    ret.resize(decompressed_size);
 
     size_t content_end = 0;
 
@@ -165,4 +151,47 @@ std::vector<uint8_t> zelda64::decompress_mm(std::span<const uint8_t> compressed_
     std::fill(ret.begin() + content_end, ret.end(), 0xFF);
 
     return ret;
+}
+
+// Produces a decompressed MM rom. This is only needed because the game has compressed code.
+// For other recomps using this repo as an example, you can omit the decompression routine and
+// set the corresponding fields in the GameEntry if the game doesn't have compressed code,
+// even if it does have compressed data.
+std::vector<uint8_t> zelda64::decompress_mm(std::span<const uint8_t> compressed_rom) {
+    // Sanity check the rom size and header. These should already be correct from the runtime's check,
+    // but it should prevent this file from accidentally being copied to another recomp.
+    if (compressed_rom.size() != 0x2000000) {
+        assert(false);
+        return {};
+    }
+
+    if (compressed_rom[0x3B] != 'N' || compressed_rom[0x3C] != 'Z' || compressed_rom[0x3D] != 'S' || compressed_rom[0x3E] != 'E') {
+        assert(false);
+        return {};
+    }
+
+    return decompress_by_dmadata(compressed_rom, 0x1A500, 0x2F00000);
+}
+
+// Produces a decompressed OoT rom, for the same reason MM needs one: the retail cartridge
+// stores its code yaz0 compressed, and the recompiled output expects the uncompressed
+// layout that the decomp builds.
+std::vector<uint8_t> zelda64::decompress_oot(std::span<const uint8_t> compressed_rom) {
+    if (compressed_rom.size() != 0x2000000) {
+        assert(false);
+        return {};
+    }
+
+    // Game code "CZLE", then the revision byte. Revision must be 0: NTSC 1.1 and 1.2 share
+    // the code and name but not the layout the recompiler was run against, and the runtime's
+    // hash check has already rejected them by this point.
+    if (compressed_rom[0x3B] != 'C' || compressed_rom[0x3C] != 'Z' || compressed_rom[0x3D] != 'L' ||
+        compressed_rom[0x3E] != 'E' || compressed_rom[0x3F] != 0x00) {
+        assert(false);
+        return {};
+    }
+
+    // dmadata sits at 0x7430, and its last entry ends at vrom 0x347E040, which rounds up to
+    // the 0x347F000 the decomp's uncompressed build produces.
+    return decompress_by_dmadata(compressed_rom, 0x7430, 0x347F000);
 }

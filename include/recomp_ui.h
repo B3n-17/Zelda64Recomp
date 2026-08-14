@@ -56,6 +56,11 @@ namespace recompui {
     ContextId try_close_current_context();
 
     ContextId get_launcher_context_id();
+
+    // mod_game_id of the game currently selected in the launcher ("mm" or "oot").
+    // The mod menu is reachable before a game starts, so it cannot use
+    // recomp::current_mod_game_id, which is only valid once one is running.
+    std::string get_selected_mod_game_id();
     ContextId get_config_context_id();
     ContextId get_config_sub_menu_context_id();
 
@@ -121,6 +126,11 @@ namespace recompui {
     void get_window_size(int& width, int& height);
     void set_cursor_visible(bool visible);
     void update_supported_options();
+
+    // Re-evaluates whether the Debug tab and its clock control apply to the game
+    // on screen, rebuilding the warp list if the running game changed. Polled once
+    // a frame from the UI draw hook.
+    void update_debug_availability();
     void toggle_fullscreen();
 
     bool get_cont_active(void);

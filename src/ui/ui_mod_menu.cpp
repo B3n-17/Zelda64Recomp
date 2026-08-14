@@ -5,6 +5,7 @@
 #include "zelda_render.h"
 
 #include "librecomp/mods.hpp"
+#include "librecomp/game.hpp"
 
 #include <string>
 
@@ -254,6 +255,9 @@ void ModMenu::refresh_mods(bool scan_mods) {
     if (scan_mods) {
         recomp::mods::scan_mods();
     }
+    // Re-read on every refresh rather than caching from construction: the menu
+    // outlives the launcher's game selection, and mods are scoped per game.
+    game_mod_id = ultramodern::is_game_started() ? recomp::current_mod_game_id() : recompui::get_selected_mod_game_id();
     mod_details = recomp::mods::get_all_mod_details(game_mod_id);
     create_mod_list();
 }

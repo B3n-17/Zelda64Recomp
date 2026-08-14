@@ -428,21 +428,68 @@ struct DebugContext {
     int set_time_hour = 12;
     int set_time_minute = 0;
     bool debug_enabled = false;
+    // What the tab's visibility is bound to: debug mode is on *and* the controls
+    // in it apply to the game on screen. Kept apart from debug_enabled because
+    // that one is the setting and is written to the config file - folding the two
+    // together would turn debug mode off for good on the first game that had no
+    // warp list.
+    bool debug_available = false;
+    // Whether the Set time block is drawn. Majora's Mask's clock, and the reason
+    // the tab is not one flag any more: Ocarina of Time has the warps above it and
+    // nothing this would set.
+    bool clock_available = false;
+    // Which game's list the three vectors below were built from, so that the frame
+    // the screen changes hands is the frame they are rebuilt. There is no event to
+    // hang this on, so it is compared rather than told.
+    zelda64::WarpTarget warp_target = zelda64::WarpTarget::MajorasMask;
 
     DebugContext() {
-        for (const auto& area : zelda64::game_warps) {
+        // Majora's Mask's list, named rather than asked for. This runs during
+        // static initialisation, and current_game_warps() would ask the runtime
+        // which game is running - a question whose machinery may not be
+        // constructed yet, and whose answer before anything has started is this
+        // list anyway. The per-frame poll rebuilds it the moment that changes.
+        fill_areas(zelda64::game_warps);
+    }
+
+    // The whole list, from the top: the running game's areas and then the scenes
+    // and entrances of whichever of them the selection lands in.
+    void rebuild_warp_names() {
+        warp_target = zelda64::current_warp_target();
+        fill_areas(zelda64::current_game_warps());
+    }
+
+    void fill_areas(const std::vector<zelda64::AreaWarps>& warps) {
+        area_names.clear();
+        for (const auto& area : warps) {
             area_names.emplace_back(area.name);
         }
-        update_warp_names();
+
+        area_index = 0;
+        scene_index = 0;
+        entrance_index = 0;
+        fill_scenes(warps);
     }
 
     void update_warp_names() {
+        fill_scenes(zelda64::current_game_warps());
+    }
+
+    void fill_scenes(const std::vector<zelda64::AreaWarps>& warps) {
         scene_names.clear();
-        for (const auto& scene : zelda64::game_warps[area_index].scenes) {
+        entrance_names.clear();
+        if (area_index < 0 || size_t(area_index) >= warps.size()) {
+            return;
+        }
+
+        const std::vector<zelda64::SceneWarps>& scenes = warps[area_index].scenes;
+        for (const auto& scene : scenes) {
             scene_names.emplace_back(scene.name);
         }
-        
-        entrance_names = zelda64::game_warps[area_index].scenes[scene_index].entrances;
+
+        if (scene_index >= 0 && size_t(scene_index) < scenes.size()) {
+            entrance_names = scenes[scene_index].entrances;
+        }
     }
 };
 
@@ -951,7 +998,9 @@ public:
 
         // Bind the debug mode enabled flag.
         constructor.Bind("debug_enabled", &debug_context.debug_enabled);
-        
+        constructor.Bind("debug_available", &debug_context.debug_available);
+        constructor.Bind("debug_clock_available", &debug_context.clock_available);
+
         // Register the array type for string vectors.
         constructor.RegisterArray<std::vector<std::string>>();
         
@@ -996,6 +1045,45 @@ void zelda64::set_debug_mode_enabled(bool enabled) {
     debug_context.debug_enabled = enabled;
     if (debug_context.model_handle) {
         debug_context.model_handle.DirtyVariable("debug_enabled");
+    }
+    recompui::update_debug_availability();
+}
+
+void recompui::update_debug_availability() {
+    // Polled rather than told, because the other half of it - which game owns the
+    // screen - changes in the runtime when a game starts, which has no business
+    // knowing there is a menu. A handful of comparisons a frame, and the dirties
+    // only happen on the frame an answer changes.
+
+    // The warp list first: it is what the two flags below are about, and a tab
+    // that appeared before its list was rebuilt would show the other game's areas
+    // for a frame.
+    if (zelda64::current_warp_target() != debug_context.warp_target) {
+        debug_context.rebuild_warp_names();
+        if (debug_context.model_handle) {
+            debug_context.model_handle.DirtyVariable("area_index");
+            debug_context.model_handle.DirtyVariable("scene_index");
+            debug_context.model_handle.DirtyVariable("entrance_index");
+            debug_context.model_handle.DirtyVariable("area_names");
+            debug_context.model_handle.DirtyVariable("scene_names");
+            debug_context.model_handle.DirtyVariable("entrance_names");
+        }
+    }
+
+    const bool available = debug_context.debug_enabled && zelda64::warps_available();
+    if (available != debug_context.debug_available) {
+        debug_context.debug_available = available;
+        if (debug_context.model_handle) {
+            debug_context.model_handle.DirtyVariable("debug_available");
+        }
+    }
+
+    const bool clock = available && zelda64::clock_available();
+    if (clock != debug_context.clock_available) {
+        debug_context.clock_available = clock;
+        if (debug_context.model_handle) {
+            debug_context.model_handle.DirtyVariable("debug_clock_available");
+        }
     }
 }
 

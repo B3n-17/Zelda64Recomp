@@ -588,6 +588,48 @@ endif()
 build_vertex_shader(Zelda64Recompiled "shaders/InterfaceVS.hlsl" "shaders/InterfaceVS.hlsl")
 build_pixel_shader(Zelda64Recompiled "shaders/InterfacePS.hlsl" "shaders/InterfacePS.hlsl")
 
+# Build the OoT built-in mods from source, so mods/*.nrm is a build output rather
+# than a checked-in binary someone has to remember to regenerate by hand.
+#
+# Gated on the same two things the patches_oot build is: a make to drive the MIPS
+# toolchain, and an OoT decomp that has been *built*, since the mod sources
+# include generated headers from it. Without either, the .nrm already in mods/ is
+# used as-is, which is what keeps a plain checkout building.
+#
+# Each mod's .nrm is declared as the OUTPUT of its build command and the glob
+# below consumes the same path, so CMake chains the two automatically: editing a
+# mod source rebuilds the .nrm, which re-runs file_to_c, which relinks the exe.
+set(OOT_MODS_DIR ${CMAKE_SOURCE_DIR}/mods_oot)
+
+if (PATCHES_MAKE AND EXISTS ${CMAKE_SOURCE_DIR}/lib/oot-decomp/build/ntsc-1.0)
+    foreach(OOT_MOD_NAME oot_recomp_dpad oot_recomp_mask_abilities oot_recomp_inventory_editor)
+        set(OOT_MOD_SRC_DIR ${OOT_MODS_DIR}/${OOT_MOD_NAME})
+        file(GLOB OOT_MOD_SOURCES "${OOT_MOD_SRC_DIR}/src/*.c" "${OOT_MOD_SRC_DIR}/include/*.h")
+
+        # The name inside the mod, which is what RecompModTool writes out; it comes
+        # from mod_filename in the mod's own mod.toml, not from the directory.
+        file(STRINGS ${OOT_MOD_SRC_DIR}/mod.toml OOT_MOD_FILENAME_LINE REGEX "^mod_filename")
+        string(REGEX REPLACE ".*\"(.*)\".*" "\\1" OOT_MOD_FILENAME ${OOT_MOD_FILENAME_LINE})
+
+        add_custom_command(
+            OUTPUT ${CMAKE_SOURCE_DIR}/mods/${OOT_MOD_FILENAME}.nrm
+            COMMAND ${CMAKE_COMMAND} -E env
+                        CC=${PATCHES_C_COMPILER}
+                        LD=${PATCHES_LD}
+                        MODTOOL=$<TARGET_FILE:RecompModTool>
+                        ${PATCHES_MAKE}
+            COMMAND ${CMAKE_COMMAND} -E copy
+                        ${OOT_MOD_SRC_DIR}/build/${OOT_MOD_FILENAME}.nrm
+                        ${CMAKE_SOURCE_DIR}/mods/${OOT_MOD_FILENAME}.nrm
+            WORKING_DIRECTORY ${OOT_MOD_SRC_DIR}
+            DEPENDS RecompModTool ${OOT_MOD_SOURCES} ${OOT_MOD_SRC_DIR}/mod.toml ${OOT_MOD_SRC_DIR}/mod.ld
+            COMMENT "Building OoT mod ${OOT_MOD_NAME}"
+        )
+    endforeach()
+else()
+    message(STATUS "OoT decomp not built or make unavailable: using the existing mods/*.nrm")
+endif()
+
 # Embed all .nrm files in the "mods" directory
 file(GLOB NRM_FILES "${CMAKE_SOURCE_DIR}/mods/*.nrm")
 

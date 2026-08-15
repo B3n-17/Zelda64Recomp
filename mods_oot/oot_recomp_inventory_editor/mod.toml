@@ -1,0 +1,30 @@
+# RecompModTool config. Schema as for mods_oot/oot_recomp_dpad/mod.toml; see the
+# comment there for where it was derived from.
+
+[manifest]
+id = "oot_recomp_inventory_editor"
+version = "1.0.0"
+display_name = "Inventory Editor"
+short_description = "Edit the inventory in place from the pause menu."
+description = "A port of the Majora's Mask DevTools inventory editor to Ocarina of Time. Press L on the pause menu to enter edit mode, then move the cursor to any slot - owned or not - and press A to grant, cycle or remove what is there. Works on the Item, Equipment and Quest Status pages. Press L again to leave."
+authors = [ "Ben" ]
+
+# Must match GameEntry::mod_game_id for OoT in src/main/main.cpp.
+game_id = "oot"
+
+minimum_recomp_version = "1.2.0"
+
+[[manifest.config_options]]
+id = "editor_enabled"
+name = "Enable Editor"
+description = "Master switch. With this off the pause menu behaves exactly as vanilla and the mod does nothing."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[inputs]
+elf_path = "build/mod.elf"
+mod_filename = "oot_recomp_inventory_editor"
+
+func_reference_syms_file = "../../Zelda64RecompSyms/oot.us.ntsc-1.0.syms.toml"
+data_reference_syms_files = [ "../../Zelda64RecompSyms/oot.us.ntsc-1.0.datasyms.toml" ]

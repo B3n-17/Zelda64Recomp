@@ -49,6 +49,9 @@
 #include "../../patches/misc_funcs.h"
 
 #include "mods/mm_recomp_dpad_builtin.h"
+#include "mods/oot_recomp_dpad_builtin.h"
+#include "mods/oot_recomp_mask_abilities.h"
+#include "mods/oot_recomp_inventory_editor.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -754,6 +757,13 @@ int main(int argc, char** argv) {
     }
 
     recomp::mods::register_embedded_mod("mm_recomp_dpad_builtin", { (const uint8_t*)(mm_recomp_dpad_builtin), std::size(mm_recomp_dpad_builtin)});
+    // The Ocarina of Time equivalent, built from mods_oot/oot_recomp_dpad. Both
+    // are registered unconditionally; a mod only applies to the game its manifest
+    // names in game_id, so the OoT one stays inert while Majora's Mask is running
+    // and vice versa.
+    recomp::mods::register_embedded_mod("oot_recomp_dpad_builtin", { (const uint8_t*)(oot_recomp_dpad_builtin), std::size(oot_recomp_dpad_builtin)});
+    recomp::mods::register_embedded_mod("oot_recomp_mask_abilities", { (const uint8_t*)(oot_recomp_mask_abilities), std::size(oot_recomp_mask_abilities)});
+    recomp::mods::register_embedded_mod("oot_recomp_inventory_editor", { (const uint8_t*)(oot_recomp_inventory_editor), std::size(oot_recomp_inventory_editor)});
 
     REGISTER_FUNC(recomp_get_window_resolution);
     REGISTER_FUNC(recomp_get_target_aspect_ratio);

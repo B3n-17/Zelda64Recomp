@@ -1,0 +1,34 @@
+# RecompModTool config. The schema is not documented anywhere in the tree; it is
+# taken from RecompModTool/main.cpp (parse_mod_config_manifest and
+# parse_mod_config_inputs) and cross-checked against the mod.json inside
+# mods/mm_recomp_dpad_builtin.nrm, which is a known-good build of the Majora's
+# Mask D-Pad mod this one is modelled on.
+
+[manifest]
+id = "oot_recomp_dpad_builtin"
+version = "1.0.0"
+display_name = "D-Pad Quick Equip"
+short_description = "Maps quick equips to the D-Pad."
+description = "Adds a D-Pad to the HUD for Ocarina of Time: Recompiled. The D-Pad plays the Ocarina and swaps boots, tunics, the Bunny Hood and shields without needing to open the pause menu."
+authors = [ "Ben" ]
+
+# Must match GameEntry::mod_game_id for OoT in src/main/main.cpp.
+game_id = "oot"
+
+minimum_recomp_version = "1.2.0"
+
+[[manifest.config_options]]
+id = "draw_dpad"
+name = "Show HUD Icons"
+description = "Controls whether the D-Pad and the items mapped to it are shown on the screen."
+type = "Enum"
+options = [ "Off", "On" ]
+default = "On"
+
+[inputs]
+elf_path = "build/mod.elf"
+mod_filename = "oot_recomp_dpad_builtin"
+
+# The same reference symbols the OoT patches build against; see patches_oot.toml.
+func_reference_syms_file = "../../Zelda64RecompSyms/oot.us.ntsc-1.0.syms.toml"
+data_reference_syms_files = [ "../../Zelda64RecompSyms/oot.us.ntsc-1.0.datasyms.toml" ]

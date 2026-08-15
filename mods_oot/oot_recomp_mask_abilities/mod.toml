@@ -1,0 +1,38 @@
+# RecompModTool config. Schema as for mods_oot/oot_recomp_dpad/mod.toml; see the
+# comment there for where it was derived from.
+
+[manifest]
+id = "oot_recomp_mask_abilities"
+version = "1.2.0"
+display_name = "Mask Abilities"
+short_description = "Gives the masks their Majora's Mask abilities."
+description = "In vanilla Ocarina of Time the masks only change what NPCs say. This gives them abilities: the Bunny Hood makes Link run faster and the Zora Mask makes him swim faster, both at a speed you can pick. Masks also stay on instead of coming off at every scene change and every time Link enters water. The Goron mask is planned."
+authors = [ "Ben" ]
+
+# Must match GameEntry::mod_game_id for OoT in src/main/main.cpp.
+game_id = "oot"
+
+minimum_recomp_version = "1.2.0"
+
+[[manifest.config_options]]
+id = "bunny_hood_speed"
+name = "Bunny Hood Speed"
+description = "How much faster the Bunny Hood makes Link run on the ground. 1.5x is what the mask does in Majora's Mask."
+type = "Enum"
+options = [ "1.5x", "2.0x" ]
+default = "1.5x"
+
+[[manifest.config_options]]
+id = "zora_swim_speed"
+name = "Zora Mask Swim Speed"
+description = "How much faster the Zora Mask makes Link swim, on the surface and underwater."
+type = "Enum"
+options = [ "1.5x", "2.0x" ]
+default = "1.5x"
+
+[inputs]
+elf_path = "build/mod.elf"
+mod_filename = "oot_recomp_mask_abilities"
+
+func_reference_syms_file = "../../Zelda64RecompSyms/oot.us.ntsc-1.0.syms.toml"
+data_reference_syms_files = [ "../../Zelda64RecompSyms/oot.us.ntsc-1.0.datasyms.toml" ]

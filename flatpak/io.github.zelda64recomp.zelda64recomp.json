@@ -28,7 +28,10 @@
         "./N64Recomp us.rev1.toml",
         "./RSPRecomp aspMain.us.rev1.toml",
         "./RSPRecomp njpgdspMain.us.rev1.toml",
-        "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_MAKE_PROGRAM=ninja -DPATCHES_C_COMPILER=clang -DPATCHES_LD=ld.lld -DRECOMP_FLATPAK=ON -G Ninja -S . -B cmake-build",
+        "./N64Recomp oot.us.ntsc-1.0.toml",
+        "./RSPRecomp aspMain.oot.ntsc-1.0.toml",
+        "./RSPRecomp njpgdspMain.oot.ntsc-1.0.toml",
+        "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_MAKE_PROGRAM=ninja -DPATCHES_C_COMPILER=clang -DPATCHES_LD=ld.lld -DRECOMP_FLATPAK=ON -DRECOMP_OOT=ON -G Ninja -S . -B cmake-build",
         "cmake --build cmake-build --config Release --target Zelda64Recompiled --parallel",
         "rm -rf assets/scss",
         "mkdir -p /app/bin",
@@ -43,7 +46,7 @@
         {
           "type": "git",
           "url": "https://github.com/N64Recomp/N64Recomp.git",
-          "commit": "989a86b36912403cd323de884bf834f2605ea770",
+          "commit": "a13e5cff96686776b0e03baf23923e3c1927b770",
           "dest": "lib/N64Recomp"
         },
         {

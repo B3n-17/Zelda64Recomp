@@ -268,7 +268,9 @@ if (RECOMP_OOT)
         DEPENDS ${CMAKE_SOURCE_DIR}/patches_oot/patches.bin
     )
 
-    if (N64RECOMP_EXECUTABLE)
+    # Only regenerate OoT patches when their ELF can also be rebuilt. CI may
+    # deliberately provide pre-generated patch output without a full OoT decomp.
+    if (N64RECOMP_EXECUTABLE AND TARGET PatchesBinOoT)
         add_custom_command(OUTPUT
                                ${CMAKE_SOURCE_DIR}/patches_oot/patches.bin
                                ${CMAKE_SOURCE_DIR}/RecompiledPatchesOoT/patches.c

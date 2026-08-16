@@ -20,17 +20,6 @@
       "name": "Zelda64Recompiled",
       "buildsystem": "simple",
       "build-commands": [
-        "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_MAKE_PROGRAM=ninja -G Ninja -S lib/N64Recomp -B lib/N64Recomp/cmake-build",
-        "cmake --build lib/N64Recomp/cmake-build --config Release --target N64Recomp --parallel",
-        "cmake --build lib/N64Recomp/cmake-build --config Release --target RSPRecomp --parallel",
-        "cp lib/N64Recomp/cmake-build/N64Recomp N64Recomp",
-        "cp lib/N64Recomp/cmake-build/RSPRecomp RSPRecomp",
-        "./N64Recomp us.rev1.toml",
-        "./RSPRecomp aspMain.us.rev1.toml",
-        "./RSPRecomp njpgdspMain.us.rev1.toml",
-        "./N64Recomp oot.us.ntsc-1.0.toml",
-        "./RSPRecomp aspMain.oot.ntsc-1.0.toml",
-        "./RSPRecomp njpgdspMain.oot.ntsc-1.0.toml",
         "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_MAKE_PROGRAM=ninja -DPATCHES_C_COMPILER=clang -DPATCHES_LD=ld.lld -DRECOMP_FLATPAK=ON -DRECOMP_OOT=ON -G Ninja -S . -B cmake-build",
         "cmake --build cmake-build --config Release --target Zelda64Recompiled --parallel",
         "rm -rf assets/scss",
@@ -43,12 +32,6 @@
         "install -Dm644 flatpak/io.github.zelda64recomp.zelda64recomp.desktop /app/share/applications/${FLATPAK_ID}.desktop"
       ],
       "sources": [
-        {
-          "type": "git",
-          "url": "https://github.com/N64Recomp/N64Recomp.git",
-          "commit": "a13e5cff96686776b0e03baf23923e3c1927b770",
-          "dest": "lib/N64Recomp"
-        },
         {
           "type": "dir",
           "path": "../"

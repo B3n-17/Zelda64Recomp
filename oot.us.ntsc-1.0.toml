@@ -20,6 +20,11 @@ function_sizes = [
 
 [patches]
 stubs = [
+    # These diagnostic/reset routines directly manipulate RCP status. The
+    # runtime owns DP state and does not expose those operations to games.
+    "RcpUtils_PrintRegisterStatus",
+    "RcpUtils_Reset",
+
     # Reads boot magic values out of kseg1 via IO_READ (0x002FB1F4 / 0x002FE1C0).
     "CIC6105_SaveBootMagicValues",
 

@@ -549,10 +549,32 @@ if (RECOMP_OOT)
     # symbol from a static library if it is not already defined, so the patches
     # have to be listed before the recompiled functions they override. Reversed,
     # the patches link cleanly but are silently never used.
-    target_link_libraries(Zelda64Recompiled PRIVATE
-        PatchesLibOoT
-        RecompiledFuncsOoT
-    )
+    target_link_libraries(Zelda64Recompiled PRIVATE PatchesLibOoT)
+
+    # Clang emits recompiled functions as weak definitions so patches can
+    # override them. Linkers do not reliably extract archive members whose only
+    # definitions are weak, so force every OoT member into the final link.
+    # Strong patch definitions still take precedence over weak originals.
+    if (WIN32)
+        target_link_libraries(Zelda64Recompiled PRIVATE RecompiledFuncsOoT)
+        target_link_options(Zelda64Recompiled PRIVATE
+            "/WHOLEARCHIVE:$<TARGET_FILE:RecompiledFuncsOoT>"
+        )
+    elseif (APPLE)
+        target_link_libraries(Zelda64Recompiled PRIVATE
+            "-Wl,-force_load,$<TARGET_FILE:RecompiledFuncsOoT>"
+        )
+    else()
+        target_link_libraries(Zelda64Recompiled PRIVATE
+            "-Wl,--whole-archive"
+            RecompiledFuncsOoT
+            "-Wl,--no-whole-archive"
+        )
+    endif()
+
+    # Keep runtime libraries after the forced OoT archive. Static ELF linkers
+    # scan left-to-right, and the archive introduces references to these APIs.
+    target_link_libraries(Zelda64Recompiled PRIVATE librecomp ultramodern)
 endif()
 
 # TODO fix the rt64 CMake script so that this doesn't need to be duplicated here

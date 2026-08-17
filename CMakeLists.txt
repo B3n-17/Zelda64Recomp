@@ -561,9 +561,14 @@ if (RECOMP_OOT)
             "/WHOLEARCHIVE:$<TARGET_FILE:RecompiledFuncsOoT>"
         )
     elseif (APPLE)
+        # Passed as a raw flag rather than a link target so -force_load stays
+        # attached to this one archive. CMake does not infer a build dependency
+        # from the $<TARGET_FILE:> inside a flag, so state it explicitly or the
+        # archive is missing at link time.
         target_link_libraries(Zelda64Recompiled PRIVATE
             "-Wl,-force_load,$<TARGET_FILE:RecompiledFuncsOoT>"
         )
+        add_dependencies(Zelda64Recompiled RecompiledFuncsOoT)
     else()
         target_link_libraries(Zelda64Recompiled PRIVATE
             "-Wl,--whole-archive"
